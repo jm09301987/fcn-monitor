@@ -1,1 +1,220 @@
+name: Daily FCN Update
+
+on:
+  schedule:
+    - cron: '30 9 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance
+
+      - name: Generate HTML
+        run: |
+          mkdir -p docs
+          python - << 'PYEOF'
+          import yfinance as yf
+          from datetime import datetime, date, timezone, timedelta
+          import os
+
+          products = [
+              {"id":"01851417","currency":"USD","coupon":13.08,
+               "maturity":"2026-09-24","ko_start":"2026-06-22","ko_end":"2026-09-21",
+               "underlyings":[
+                 {"ticker":"AAL", "strike":10.16,   "ko":11.43,    "ki":9.525},
+                 {"ticker":"AVGO","strike":351.832,  "ko":395.811,  "ki":329.8425},
+                 {"ticker":"PLTR","strike":106.984,  "ko":120.357,  "ki":100.2975},
+               ]},
+              {"id":"01851432","currency":"USD","coupon":17.03,
+               "maturity":"2026-10-07","ko_start":"2026-07-02","ko_end":"2026-10-02",
+               "underlyings":[
+                 {"ticker":"AAL", "strike":11.876,  "ko":13.3605, "ki":None},
+                 {"ticker":"META","strike":489.872,  "ko":551.106,  "ki":None},
+                 {"ticker":"AVGO","strike":337.608,  "ko":379.809,  "ki":None},
+               ]},
+              {"id":"01851433","currency":"USD","coupon":16.65,
+               "maturity":"2026-10-07","ko_start":"2026-07-02","ko_end":"2026-10-02",
+               "underlyings":[
+                 {"ticker":"AAL", "strike":11.876,  "ko":13.3605, "ki":None},
+                 {"ticker":"AVGO","strike":337.608,  "ko":379.809,  "ki":None},
+                 {"ticker":"AMZN","strike":212.232,  "ko":238.761,  "ki":None},
+               ]},
+              {"id":"01851435","currency":"USD","coupon":13.01,
+               "maturity":"2026-10-08","ko_start":"2026-07-06","ko_end":"2026-10-05",
+               "underlyings":[
+                 {"ticker":"ORCL", "strike":152.768, "ko":162.316, "ki":None},
+                 {"ticker":"GOOGL","strike":311.064,  "ko":330.506,  "ki":None},
+                 {"ticker":"AVGO", "strike":337.488,  "ko":358.581,  "ki":None},
+               ]},
+              {"id":"01851438","currency":"AUD","coupon":11.12,
+               "maturity":"2026-10-08","ko_start":"2026-07-06","ko_end":"2026-10-05",
+               "underlyings":[
+                 {"ticker":"NVDA","strike":171.4,    "ko":201.395,   "ki":None},
+                 {"ticker":"AVGO","strike":341.264,  "ko":400.9852,  "ki":None},
+                 {"ticker":"ASML","strike":1284.616, "ko":1509.4238, "ki":None},
+               ]},
+              {"id":"01851439","currency":"AUD","coupon":10.60,
+               "maturity":"2026-10-08","ko_start":"2026-07-06","ko_end":"2026-10-05",
+               "underlyings":[
+                 {"ticker":"NVDA","strike":171.4,   "ko":197.11,  "ki":None},
+                 {"ticker":"AVGO","strike":341.264, "ko":392.454, "ki":None},
+                 {"ticker":"PLTR","strike":114.672, "ko":131.873, "ki":None},
+               ]},
+              {"id":"01851440","currency":"AUD","coupon":12.93,
+               "maturity":"2026-10-08","ko_start":"2026-07-06","ko_end":"2026-10-05",
+               "underlyings":[
+                 {"ticker":"NVDA","strike":171.4,   "ko":188.54,  "ki":None},
+                 {"ticker":"AVGO","strike":341.264, "ko":375.390, "ki":None},
+                 {"ticker":"ORCL","strike":162.96,  "ko":179.256, "ki":None},
+               ]},
+              {"id":"01851441","currency":"AUD","coupon":11.19,
+               "maturity":"2026-10-08","ko_start":"2026-07-06","ko_end":"2026-10-05",
+               "underlyings":[
+                 {"ticker":"AVGO", "strike":341.264,"ko":383.922,"ki":None},
+                 {"ticker":"ORCL", "strike":162.96, "ko":183.33, "ki":None},
+                 {"ticker":"GOOGL","strike":312.104,"ko":351.117,"ki":None},
+               ]},
+              {"id":"01851446","currency":"USD","coupon":12.00,
+               "maturity":"2026-10-08","ko_start":"2026-07-06","ko_end":"2026-10-05",
+               "underlyings":[
+                 {"ticker":"META","strike":508.232,"ko":571.761,"ki":508.232},
+                 {"ticker":"ORCL","strike":162.96, "ko":183.33, "ki":162.96},
+                 {"ticker":"NVDA","strike":171.4,  "ko":192.825,"ki":171.4},
+               ]},
+          ]
+
+          for p in products:
+              for u in p["underlyings"]:
+                  if u["ki"] is None:
+                      u["ki"] = u["strike"]
+
+          def fetch_prices(tickers):
+              prices = {}
+              for t in tickers:
+                  try:
+                      hist = yf.Ticker(t).history(period="2d")
+                      prices[t] = round(hist["Close"].iloc[-1],4) if not hist.empty else None
+                  except:
+                      prices[t] = None
+              return prices
+
+          def analyze(prices):
+              today = date.today()
+              results = []
+              for p in products:
+                  mat  = datetime.strptime(p["maturity"], "%Y-%m-%d").date()
+                  ko_s = datetime.strptime(p["ko_start"],"%Y-%m-%d").date()
+                  ko_e = datetime.strptime(p["ko_end"],  "%Y-%m-%d").date()
+                  days = (mat-today).days
+                  in_ko = ko_s<=today<=ko_e
+                  ko_out=ki_in=False
+                  wbuf=float("inf"); wt="-"; rows=[]
+                  for u in p["underlyings"]:
+                      t=u["ticker"]; cur=prices.get(t)
+                      if cur is None:
+                          rows.append({"ticker":t,"cur":None,"strike":u["strike"],"ko":u["ko"],"ki":u["ki"],"ko_buf":None,"ki_buf":None,"ko_hit":False,"ki_hit":False})
+                          continue
+                      kb=round((cur/u["ko"]-1)*100,2); kh=in_ko and cur>=u["ko"]
+                      ib=round((cur/u["ki"]-1)*100,2); ih=cur<=u["ki"]
+                      if kh: ko_out=True
+                      if ih: ki_in=True
+                      if kb<wbuf: wbuf=kb; wt=t
+                      rows.append({"ticker":t,"cur":cur,"strike":u["strike"],"ko":u["ko"],"ki":u["ki"],"ko_buf":kb,"ki_buf":ib,"ko_hit":kh,"ki_hit":ih})
+                  if ko_out:     st,sc="KO 觸發","status-ko"
+                  elif ki_in:    st,sc="KI 觸發","status-ki"
+                  elif days<=14: st,sc="即將到期","status-near"
+                  elif not in_ko:st,sc="觀察未開始","status-wait"
+                  else:          st,sc="觀察中","status-watch"
+                  results.append({**p,"days":days,"in_ko":in_ko,"knocked_out":ko_out,"knocked_in":ki_in,"wbuf":wbuf,"wt":wt,"st":st,"sc":sc,"rows":rows})
+              return results
+
+          def bc(v):
+              if v is None: return ""
+              return "bd" if v<0 else ("bw" if v<5 else "bo")
+
+          def make_html(results,upd):
+              kol=[r["id"] for r in results if r["knocked_out"]]
+              kil=[r["id"] for r in results if r["knocked_in"]]
+              nl =[r["id"] for r in results if r["days"]<=14]
+              al=""
+              if kol: al+=f'<div class="al ako">✅ KO觸發：{", ".join(kol)}</div>'
+              if kil: al+=f'<div class="al aki">🚨 KI觸發：{", ".join(kil)}</div>'
+              if nl:  al+=f'<div class="al anr">⚠️ 14天內到期：{", ".join(nl)}</div>'
+              if not al: al='<div class="al aok">✅ 無異常，所有產品正常觀察中</div>'
+              ov=""
+              for r in results:
+                  buf=f"{r['wbuf']:.1f}%" if r['wbuf']!=float('inf') else "-"
+                  wb=r['wbuf'] if r['wbuf']!=float('inf') else None
+                  ov+=f"<tr><td><b>{r['id']}</b></td><td>{r['currency']}</td><td class='cp'>{r['coupon']}%</td><td>{r['maturity']}</td><td>{r['days']}</td><td>{r['wt']}</td><td class='{bc(wb)}'>{buf}</td><td><span class='badge {r['sc']}'>{r['st']}</span></td></tr>"
+              cards=""
+              for r in results:
+                  trs=""
+                  for tr in r["rows"]:
+                      if tr["cur"] is None:
+                          trs+=f"<tr><td><b>{tr['ticker']}</b></td><td>-</td><td>{tr['strike']:.2f}</td><td>{tr['ko']:.2f}</td><td>-</td><td>{tr['ki']:.2f}</td><td>-</td><td>-</td></tr>"
+                          continue
+                      flag="KO觸發" if tr["ko_hit"] else("KI觸發" if tr["ki_hit"] else "正常")
+                      fc="badge status-ko" if tr["ko_hit"] else("badge status-ki" if tr["ki_hit"] else "badge status-watch")
+                      kic="bd" if tr["ki_hit"] else("bw" if tr["ki_buf"]<10 else "")
+                      trs+=f"<tr><td><b>{tr['ticker']}</b></td><td>{tr['cur']:.2f}</td><td>{tr['strike']:.2f}</td><td>{tr['ko']:.2f}</td><td class='{bc(tr[\"ko_buf\"])}'>{tr['ko_buf']:+.1f}%</td><td>{tr['ki']:.2f}</td><td class='{kic}'>{tr['ki_buf']:+.1f}%</td><td><span class='{fc}'>{flag}</span></td></tr>"
+                  cards+=f'<div class="card"><div class="chd"><div><span class="cid">{r["id"]}</span><span class="badge {r["sc"]}" style="margin-left:8px">{r["st"]}</span></div><div class="cmt">{r["currency"]} · {r["coupon"]}% · 到期{r["maturity"]} · 剩{r["days"]}天</div></div><div class="cbd"><table class="dt"><thead><tr><th>標的</th><th>現價</th><th>執行價</th><th>KO價</th><th>距KO</th><th>KI價</th><th>距KI</th><th>狀態</th></tr></thead><tbody>{trs}</tbody></table></div></div>'
+              return f'''<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>FCN監控</title><style>
+          *{{box-sizing:border-box;margin:0;padding:0}}body{{font-family:-apple-system,"PingFang TC",sans-serif;background:#F0F2F5;font-size:13px}}
+          .hd{{background:linear-gradient(135deg,#1B2A4A,#2E4A7A);color:#fff;padding:16px}}.hd h1{{font-size:17px}}.hd p{{font-size:11px;color:#C9A84C;margin-top:4px}}
+          .wrap{{max-width:960px;margin:0 auto;padding:12px}}.sec{{font-size:13px;font-weight:bold;color:#1B2A4A;border-left:3px solid #C9A84C;padding-left:8px;margin:16px 0 8px}}
+          .al{{padding:8px 12px;border-radius:6px;margin-bottom:6px;font-weight:bold;font-size:12px}}
+          .aok{{background:#E8F5E9;color:#2E7D32;border-left:4px solid #2E7D32}}.ako{{background:#E8F5E9;color:#1B5E20;border-left:4px solid #43A047}}
+          .aki{{background:#FFEBEE;color:#C62828;border-left:4px solid #C62828}}.anr{{background:#FFF3E0;color:#E65100;border-left:4px solid #E65100}}
+          .ow{{overflow-x:auto;-webkit-overflow-scrolling:touch}}
+          .ov{{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.08)}}
+          .ov thead tr{{background:#1B2A4A;color:#fff}}.ov th{{padding:8px 10px;text-align:center;font-size:11px;white-space:nowrap}}
+          .ov td{{padding:7px 10px;text-align:center;font-size:12px;border-bottom:1px solid #EEE;white-space:nowrap}}.ov tbody tr:nth-child(even){{background:#F7F9FC}}
+          .cp{{color:#C9A84C;font-weight:bold}}.bo{{color:#2E7D32;font-weight:bold}}.bw{{color:#E65100;font-weight:bold}}.bd{{color:#C62828;font-weight:bold}}
+          .badge{{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;white-space:nowrap}}
+          .status-ko{{background:#E8F5E9;color:#2E7D32}}.status-ki{{background:#FFEBEE;color:#C62828}}
+          .status-near{{background:#FFF3E0;color:#E65100}}.status-wait{{background:#ECEFF1;color:#607D8B}}.status-watch{{background:#E3F2FD;color:#1565C0}}
+          .card{{background:#fff;border-radius:8px;margin-bottom:12px;box-shadow:0 1px 6px rgba(0,0,0,.08);overflow:hidden}}
+          .chd{{background:#1B2A4A;padding:10px 14px}}.cid{{font-size:14px;font-weight:bold;color:#C9A84C}}.cmt{{font-size:11px;color:#90A4AE;margin-top:3px}}
+          .cbd{{padding:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}}
+          .dt{{width:100%;border-collapse:collapse;font-size:11px}}.dt thead tr{{background:#3A5278;color:#fff}}
+          .dt th{{padding:6px 8px;text-align:center;white-space:nowrap}}.dt td{{padding:6px 8px;text-align:center;border-bottom:1px solid #EEE;white-space:nowrap}}
+          .dt tbody tr:nth-child(even){{background:#F7F9FC}}.ft{{text-align:center;color:#9E9E9E;font-size:10px;padding:16px 0 24px}}
+          </style></head><body>
+          <div class="hd"><h1>FCN 結構型商品　每日監控</h1><p>更新：{upd} (台北) · {len(results)}支商品</p></div>
+          <div class="wrap"><div class="sec">今日警示</div>{al}
+          <div class="sec">產品總覽</div><div class="ow"><table class="ov">
+          <thead><tr><th>產品編號</th><th>幣別</th><th>年化</th><th>到期日</th><th>剩餘天</th><th>最弱標的</th><th>距KO</th><th>狀態</th></tr></thead>
+          <tbody>{ov}</tbody></table></div>
+          <div class="sec">各產品明細</div>{cards}
+          <div class="ft">※資訊僅供參考，以正式合約為準</div></div></body></html>'''
+
+          tz=timezone(timedelta(hours=8))
+          upd=datetime.now(tz).strftime("%Y/%m/%d %H:%M")
+          tickers=list({u["ticker"] for p in products for u in p["underlyings"]})
+          prices=fetch_prices(tickers)
+          results=analyze(prices)
+          os.makedirs("docs",exist_ok=True)
+          with open("docs/index.html","w",encoding="utf-8") as f:
+              f.write(make_html(results,upd))
+          print("done:", os.path.getsize("docs/index.html"), "bytes")
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f docs/index.html
+          git commit -m "update $(date -u +'%Y-%m-%d %H:%M')"
+          git push
 
